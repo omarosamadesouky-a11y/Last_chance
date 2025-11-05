@@ -14,7 +14,6 @@ import tempfile
 import warnings
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-import whisper
 # import spacy <-- REMOVED
 # from spacy.tokens import Doc <-- REMOVED
 import requests
@@ -1881,3 +1880,4 @@ if lead_data:
             # Clean up temporary file
             if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
+
