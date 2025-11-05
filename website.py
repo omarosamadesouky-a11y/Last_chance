@@ -422,33 +422,50 @@ class FormParser:
         return "Standard motivation"
 
 # --- AudioProcessor Class (with Caching) ---
+# --- AudioProcessor Class (API Version) ---
 class AudioProcessor:
-    """Handle audio download and transcription using local Whisper"""
+    """Handle audio download and transcription using OpenAI's API"""
     
     def __init__(self):
-        self.whisper_model = self._load_model()
-    
-    @st.cache_resource  # <-- ADDED: Cache the Whisper model
-    def _load_model(_self):
-        """Load Whisper model on demand"""
-        with st.spinner("🧠 Loading Whisper AI model (small)... This may take a moment."):
-            model = whisper.load_model("small")
-        return model
-    
+        # We don't load a local model. We will initialize a client.
+        self.client = self._get_openai_client()
+
+    @st.cache_resource
+    def _get_openai_client(_self):
+        """Get the OpenAI client from secrets."""
+        try:
+            # Get key from Streamlit secrets
+            api_key = st.secrets["OPENAI_API_KEY"]
+            if not api_key:
+                st.error("❌ OPENAI_API_KEY not found in Streamlit secrets.")
+                return None
+            
+            client = OpenAI(api_key=api_key)
+            return client
+        
+        except Exception as e:
+            st.error(f"❌ Failed to initialize OpenAI client: {e}")
+            return None
+
     def transcribe_audio(self, audio_url: str, status_tracker=None) -> Dict[str, Any]:
-        """Transcribe audio from URL with time estimates and failure handling"""
+        """Transcribe audio from URL using the OpenAI API"""
         
         if status_tracker:
             status_tracker.update_stage('audio_transcription', 'processing', 'Starting audio transcription...')
-        
+
         result = {
             'transcript': None,
-            'language': None, 
+            'language': 'en', # Default
             'success': False,
             'error': None
         }
 
-        # Validate URL first
+        if not self.client:
+            result['error'] = "OpenAI client not initialized."
+            if status_tracker:
+                status_tracker.update_stage('audio_transcription', 'failed', result['error'])
+            return result
+
         if not audio_url or 'http' not in audio_url:
             error_msg = "Invalid audio URL"
             result['error'] = error_msg
@@ -457,10 +474,8 @@ class AudioProcessor:
             return result
 
         temp_path = None
-        progress_placeholder = None  # <-- ADD THIS
-        progress_bar = None 
         try:
-            # Download audio with progress
+            # --- 1. Download audio ---
             if status_tracker:
                 status_tracker.update_stage('audio_transcription', 'processing', 'Downloading audio file...')
             
@@ -471,60 +486,36 @@ class AudioProcessor:
                 f.write(response.content)
                 temp_path = f.name
             
-            # Get audio duration for time estimate
-            audio_duration = self._estimate_audio_duration(temp_path)
-            estimated_time = self._calculate_transcription_time(audio_duration)
-            
+            # --- 2. Transcribe using API ---
             if status_tracker:
-                status_tracker.update_stage('audio_transcription', 'processing', 
-                                        f'Transcribing audio (~{estimated_time}s remaining)...')
-
-            # Create progress indicators
-            progress_placeholder = st.empty()
-            progress_bar = st.progress(0)
-
-            # Show initial progress
-            progress_bar.progress(0.1)
-            progress_placeholder.text(f"Starting transcription... (~{estimated_time}s remaining)")
-
-            # Do the actual transcription (this is the slow part)
-            model = self.whisper_model
-            transcription = model.transcribe(temp_path)
-
-            # Complete the progress
-            progress_bar.progress(1.0)
-            progress_placeholder.text("Transcription complete!")
-
-            # Clean up progress indicators
-            progress_placeholder.empty()
-            progress_bar.empty()
-
-            if not transcription['text'].strip():
+                status_tracker.update_stage('audio_transcription', 'processing', 'Sending audio to Whisper API...')
+            
+            with open(temp_path, "rb") as audio_file:
+                # This is the API call
+                transcription = self.client.audio.transcriptions.create(
+                    model="whisper-1", 
+                    file=audio_file
+                )
+            
+            transcript_text = transcription.text.strip()
+            
+            if not transcript_text:
                 raise Exception("Transcription returned empty content")
 
-            result['transcript'] = transcription['text'].strip()
-            result['language'] = transcription.get('language', 'en')
+            result['transcript'] = transcript_text
+            result['language'] = transcription.language if hasattr(transcription, 'language') else 'en'
             result['success'] = True
             
             if status_tracker:
                 status_tracker.update_stage('audio_transcription', 'complete', 'Transcription completed successfully')
             
-            st.success("✅ Transcription complete")
+            st.success("✅ Transcription complete (via API)")
 
         except Exception as e:
             error_msg = str(e)
             result['error'] = error_msg
-            
-            # Clear any progress indicators
-            try:
-                progress_placeholder.empty()
-                progress_bar.empty()
-            except:
-                pass
-                
             if status_tracker:
                 status_tracker.update_stage('audio_transcription', 'failed', f'Transcription failed: {error_msg}')
-            
             st.error(f"❌ Transcription failed: {error_msg}")
             
         finally:
@@ -532,20 +523,9 @@ class AudioProcessor:
                 os.unlink(temp_path)
                 
         return result
-
-    def _estimate_audio_duration(self, file_path: str) -> int:
-        """Estimate audio duration in seconds (simplified)"""
-        try:
-            file_size = os.path.getsize(file_path)
-            # Rough estimate: 1MB ≈ 60 seconds of audio
-            return max(30, min(600, file_size / (1024 * 1024) * 60))
-        except:
-            return 60  # Default fallback
-
-    def _calculate_transcription_time(self, audio_duration: int) -> int:
-        """Calculate estimated transcription time in seconds"""
-        base_time = 45  # Base processing time
-        return base_time + int(audio_duration * 1.5)
+    
+    # You can remove the _estimate_audio_duration and _calculate_transcription_time
+    # methods as the API is much faster and doesn't need them.
 
 # --- ConversationSummarizer Class (Unchanged) ---
 class ConversationSummarizer:
@@ -1777,17 +1757,51 @@ class RealEstateAutomationSystem:
 
 # --- STREAMLIT UI ---
 
-st.set_page_config(layout="wide")
-st.title("🤖 Real Estate Lead Automation System")
-st.markdown("Paste your lead data below or upload a file")
+# --- API Key Loading ---
 
-# Check if API key is available in secrets
-if 'DEEPSEEK_API_KEY' in st.secrets:
-    st.success("✅ DeepSeek API key found in secrets")
-    os.environ["DEEPSEEK_API_KEY"] = st.secrets["DEEPSEEK_API_KEY"]
+# 1. Check for DeepSeek Key (Your existing check)
+deepseek_api_key = None
+try:
+    deepseek_api_key = getattr(st, "secrets", {}).get("DEEPSEEK_API_KEY")
+except Exception:
+    deepseek_api_key = None 
+if not deepseek_api_key:
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+
+# 2. Check for OpenAI Key (NEW - For Whisper API)
+openai_api_key = None
+try:
+    openai_api_key = getattr(st, "secrets", {}).get("OPENAI_API_KEY")
+except Exception:
+    openai_api_key = None
+if not openai_api_key:
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+
+
+# --- Final Validation ---
+all_keys_loaded = True
+
+# Validate DeepSeek Key
+if deepseek_api_key:
+    st.success("✅ DeepSeek API key loaded")
+    os.environ["DEEPSEEK_API_KEY"] = deepseek_api_key 
 else:
-    st.error("❌ DeepSeek API key not found in secrets.")
-    st.stop()
+    st.error("❌ DEEPSEEK_API_KEY not found in Streamlit secrets or environment variables.")
+    all_keys_loaded = False
+
+# Validate OpenAI Key (NEW)
+if openai_api_key:
+    st.success("✅ OpenAI API key loaded")
+    os.environ["OPENAI_API_KEY"] = openai_api_key
+else:
+    st.error("❌ OPENAI_API_KEY not found in Streamlit secrets or environment variables.")
+    all_keys_loaded = False
+
+# Stop the app if any key is missing
+if not all_keys_loaded:
+    st.warning("Please add all required API keys to your secrets/environment to run the app.")
+    st.stop() 
+
 
 # --- Property Count Selection ---
 st.subheader("🏠 Property Selection")
@@ -1845,7 +1859,9 @@ if lead_data:
 
         try:
             # Initialize and run the system
-            system = RealEstateAutomationSystem()
+            # Make sure the 'RealEstateAutomationSystem' class definition
+            # is in the script *above* this UI code.
+            system = RealEstateAutomationSystem() 
             
             # Process the lead using your existing method
             with st.container():
@@ -1863,6 +1879,5 @@ if lead_data:
             
         finally:
             # Clean up temporary file
-            if os.path.exists(temp_file_path):
+            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
-
