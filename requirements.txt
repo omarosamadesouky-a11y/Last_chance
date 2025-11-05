@@ -1,6 +1,5 @@
 streamlit
+openai-whisper
 openai
 requests
 setuptools-rust
-openai-whisper
-
