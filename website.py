@@ -617,7 +617,6 @@ class ConversationSummarizer:
         return "\n".join(summary_lines)
 
 # --- AIRephraser Class (with Caching) ---
-# --- AIRephraser Class (with Caching) ---
 class AIRephraser:
     """
     V11: Complete AI analysis for all major conversation topics
@@ -692,25 +691,34 @@ class AIRephraser:
             question = "What is the seller's stated reason for selling the property?"
 
         elif topic_name == "Property Condition":
-            # --- PROPERTY CONDITION PROMPT ---
+            # --- IMPROVED PROPERTY CONDITION PROMPT ---
             system_prompt = f"""
             You are an expert real estate call analyst.
             Your job is to analyze the following call transcript and summarize
-            the seller's description of the property's condition into a narrative paragraph.
+            the seller's description of the property's condition into a clear, concise statement.
             
             CRITICAL INSTRUCTIONS:
-            - Combine all details (repairs, roof, updates, etc.) into one flowing statement.
-            - DO NOT use bullet points.
-            - DO NOT add "The seller stated:". Just write the paragraph.
-            - EXAMPLE: "The property is in good shape but needs a new roof which will cost $9,500. The interior has been well-maintained and the house is ready for immediate occupancy."
-            - If no condition is mentioned, say "No specific condition details discussed".
-            - Focus on key issues: roof, HVAC, foundation, cosmetic updates, major repairs.
-            - Mention specific costs if discussed.
+            - Focus on ACTUAL condition details mentioned: roof, HVAC, foundation, repairs needed, updates, age, etc.
+            - If NO specific condition details are mentioned, return: "No specific condition details discussed"
+            - Be realistic and factual - only mention what was actually discussed
+            - Keep it to 1-2 sentences maximum
+            - DO NOT make up or assume condition details
+            - DO NOT use bullet points
+            - Examples of good responses:
+              * "Property needs new roof which will cost $9,500. Interior is in good condition."
+              * "House is in excellent condition with recent kitchen and bathroom updates."
+              * "Needs some repairs including HVAC replacement and cosmetic updates."
+              * "No specific condition details discussed"
+              * "Seller mentioned the property is in good shape overall, no major issues."
+            
+            IMPORTANT: If the transcript doesn't contain any specific details about the property's 
+            physical condition, structure, repairs, updates, age, or maintenance, then return 
+            "No specific condition details discussed".
 
             Transcript:
             {transcript}
             """
-            question = "What is the seller's description of the property's condition?"
+            question = "What specific details about the property's condition were mentioned in the conversation?"
 
         elif topic_name == "Mortgage Status":
             # --- MORTGAGE STATUS PROMPT ---
@@ -782,7 +790,6 @@ class AIRephraser:
             """
             question = "Summarize the seller's personality and communication style based on the transcript."
             
-        # In the AIRephraser class, update the Property Type section:
         elif topic_name == "Property Type":
             # --- (MODIFIED) PROPERTY TYPE CLEANING PROMPT ---
             system_prompt = f"""
@@ -832,7 +839,7 @@ class AIRephraser:
             {transcript}
             """
             question = "Clean and format this property type description from the form according to the rules."
-        # Add this new condition in the rephrase method of AIRephraser class:
+
         elif topic_name == "Important Highlights":
             # --- IMPORTANT CALL HIGHLIGHTS PROMPT ---
             system_prompt = f"""
